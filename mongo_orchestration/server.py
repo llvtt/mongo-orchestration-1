@@ -18,6 +18,8 @@ log_file = os.path.join(work_dir, 'server.log')
 DEFAULT_PORT = 8889
 
 import logging
+# Remove any handlers attached by importing this module.
+logging.getLogger('mongo_orchestration').handlers = []
 logging.basicConfig(level=logging.DEBUG, filename=log_file, filemode='w')
 
 
