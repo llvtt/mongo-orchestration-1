@@ -20,8 +20,9 @@ Requires
 --------
 
 -  `Python 2.6, 2.7, or >= 3.2 <http://www.python.org/download/>`__
--  `PyMongo 2.7.2 <https://pypi.python.org/pypi/pymongo/2.7.2>`__
--  `CherryPy 3.5.0 <http://www.cherrypy.org/>`__
+-  `PyMongo >= 2.7.2 <https://pypi.python.org/pypi/pymongo>`__
+-  `CherryPy >= 3.5.0 <http://www.cherrypy.org/>`__
+-  `argparse >= 1.2.1 <https://pypi.python.org/pypi/argparse>`__ (Python 2.6 only)
 
 Installation
 ------------
@@ -41,9 +42,7 @@ manually:
     cd mongo-orchestration
     python setup.py install
 
-Cloning the repository this way will also give you access to `predefined
-configurations <https://github.com/mongodb/mongo-orchestration/blob/master/README.md#predefined-configurations>`__
-for Mongo Orchestration as well as the "mo" script. Note that you may
+Cloning the repository this way will also give you access to `predefined configurations`_ for Mongo Orchestration as well as the "mo" script. Note that you may
 have to run the above commands with ``sudo``, depending on where you're
 installing Mongo Orchestration and what privileges you have.
 Installation will place a ``mongo-orchestration`` script on your path.
@@ -90,7 +89,7 @@ Configuration File
 
 Mongo Orchestration may be given a JSON configuration file with the
 ``--config`` option specifying where to find MongoDB binaries. See
-```mongo-orchestration.config`` <https://github.com/mongodb/mongo-orchestration/blob/master/mongo-orchestration.config>`__
+`mongo-orchestration.config <https://github.com/mongodb/mongo-orchestration/blob/master/mongo-orchestration.config>`__
 for an example. When no configuration file is provided, Mongo
 Orchestration uses whatever binaries are on the user's PATH.
 
@@ -171,6 +170,11 @@ piping the response into ``python -m json.tool``, e.g.:
 
 Tests
 -----
+
+Running the tests has the following additional dependencies:
+
+-  `nose >= 1.3.4 <https://pypi.python.org/pypi/nose>`__
+-  `unittest2 >= 0.6 <https://pypi.python.org/pypi/unittest2>`__ (Python 2.6 only)
 
 Run all tests
 ~~~~~~~~~~~~~
