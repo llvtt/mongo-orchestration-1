@@ -1,10 +1,12 @@
 {
     "configsvrs": [
         {
-            "dbpath": "$DBPATH/db27117",
-            "logpath": "$LOGPATH/configsvr27117.log",
-            "port": 27117,
-            "setParameter": {"enableTestCommands": 1}
+            "procParams": {
+                "dbpath": "$DBPATH/db27117",
+                "logpath": "$LOGPATH/configsvr27117.log",
+                "port": 27117,
+                "setParameter": {"enableTestCommands": 1}
+            }
         }
     ], 
     "id": "shard_cluster_1", 
@@ -34,14 +36,18 @@
     ], 
     "routers": [
         {
-            "logpath": "$LOGPATH/router27017.log",
-            "port": 27017,
-            "setParameter": {"enableTestCommands": 1}
+            "procParams": {
+                "logpath": "$LOGPATH/router27017.log",
+                "port": 27017,
+                "setParameter": {"enableTestCommands": 1}
+            }
         }, 
         {
-            "logpath": "$LOGPATH/router27018.log",
-            "port": 27018,
-            "setParameter": {"enableTestCommands": 1}
+            "procParams": {
+                "logpath": "$LOGPATH/router27018.log",
+                "port": 27018,
+                "setParameter": {"enableTestCommands": 1}
+            }
         }
     ]
 }

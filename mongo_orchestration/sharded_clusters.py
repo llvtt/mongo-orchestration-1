@@ -80,11 +80,13 @@ class ShardedCluster(object):
         """create and start config servers"""
         self._configsvrs = []
         for cfg in params:
-            cfg.update({'configsvr': True})
+            version = cfg.get('version', self._version)
+            server_cfg = cfg.get('procParams', {})
+            server_cfg.update({'configsvr': True})
             self._configsvrs.append(Servers().create(
-                'mongod', cfg,
+                'mongod', server_cfg,
                 sslParams=self.sslParams, autostart=True,
-                auth_key=self.auth_key, version=self._version))
+                auth_key=self.auth_key, version=version))
 
     def __len__(self):
         return len(self._shards)
@@ -116,11 +118,14 @@ class ShardedCluster(object):
     def router_add(self, params):
         """add new router (mongos) into existing configuration"""
         cfgs = ','.join([Servers().hostname(item) for item in self._configsvrs])
-        params.update({'configdb': cfgs})
+        proc_params = params.get('procParams', {})
+        proc_params['configdb'] = cfgs
+        version = params.get('version', self._version)
         self._routers.append(Servers().create(
-            'mongos', params, sslParams=self.sslParams, autostart=True,
-            auth_key=self.auth_key, version=self._version))
-        return {'id': self._routers[-1], 'hostname': Servers().hostname(self._routers[-1])}
+            'mongos', proc_params, sslParams=self.sslParams,
+            autostart=True, auth_key=self.auth_key, version=version))
+        return {'id': self._routers[-1],
+                'hostname': Servers().hostname(self._routers[-1])}
 
     def connection(self):
         c = MongoClient(self.router['hostname'], **self.kwargs)
@@ -163,6 +168,7 @@ class ShardedCluster(object):
     def member_add(self, member_id=None, params=None):
         """add new member into existing configuration"""
         member_id = member_id or str(uuid4())
+        version = params.get('version', self._version)
         if 'members' in params:
             # is replica set
             rs_params = params.copy()
@@ -170,8 +176,8 @@ class ShardedCluster(object):
             rs_params.update({'sslParams': self.sslParams})
             if self.login and self.password:
                 rs_params.update({'login': self.login, 'password': self.password})
-            if self._version:
-                rs_params['version'] = self._version
+            if version:
+                rs_params['version'] = version
             rs_id = ReplicaSets().create(rs_params)
             members = ReplicaSets().members(rs_id)
             cfgs = rs_id + r"/" + ','.join([item['host'] for item in members])
@@ -185,8 +191,8 @@ class ShardedCluster(object):
             # is single server
             params.update({'autostart': True, 'auth_key': self.auth_key, 'sslParams': self.sslParams})
             params['procParams'] = params.get('procParams', {})
-            if self._version:
-                params['version'] = self._version
+            if version:
+                params['version'] = version
             logger.debug("servers create params: {params}".format(**locals()))
             server_id = Servers().create('mongod', **params)
             result = self._add(Servers().hostname(server_id), member_id)

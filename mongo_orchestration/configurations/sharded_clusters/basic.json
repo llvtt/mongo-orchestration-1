@@ -1,7 +1,7 @@
 {
     "configsvrs": [
         {
-            "setParameter": {"enableTestCommands": 1}
+            "procParams": {"setParameter": {"enableTestCommands": 1}}
         }
     ],
     "shards": [
@@ -19,7 +19,7 @@
         }
     ], 
     "routers": [
-        {"setParameter": {"enableTestCommands": 1}},
-        {"setParameter": {"enableTestCommands": 1}}
+        {"procParams": {"setParameter": {"enableTestCommands": 1}}},
+        {"procParams": {"setParameter": {"enableTestCommands": 1}}}
     ]
 }

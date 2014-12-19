@@ -241,7 +241,7 @@ class ReplicaSet(object):
 
         server_id = self._servers.create(
             'mongod', proc_params, self.sslParams, self.auth_key,
-            version=self._version)
+            version=params.get('version', self._version))
         member_config.update({"_id": member_id,
                               "host": self._servers.hostname(server_id)})
         return member_config
