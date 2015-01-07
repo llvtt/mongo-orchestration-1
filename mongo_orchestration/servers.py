@@ -27,6 +27,7 @@ from uuid import uuid4
 import pymongo
 
 from mongo_orchestration import process
+from mongo_orchestration.common import DEFAULT_USER, DEFAULT_PWD
 from mongo_orchestration.errors import ServersError, TimeoutError
 from mongo_orchestration.singleton import Singleton
 from mongo_orchestration.container import Container
@@ -58,20 +59,19 @@ class Server(object):
         if log_path and not os.path.exists(os.path.dirname(log_path)):
             os.makedirs(log_path)
 
-    def __init_mongod(self, params, ssl):
+    def __init_mongod(self, params, add_auth=False):
         cfg = self.mongod_default.copy()
         cfg.update(params)
-        cfg.update(ssl)
 
         # create db folder
         cfg['dbpath'] = self.__init_db(cfg.get('dbpath', None))
 
         # use keyFile
-        if self.auth_key:
+        if add_auth and self.auth_key:
             cfg['auth'] = True
             cfg['keyFile'] = self.__init_auth_key(self.auth_key, cfg['dbpath'])
 
-        if self.login:
+        if add_auth and self.login:
             cfg['auth'] = True
 
         # create logpath
@@ -83,14 +83,13 @@ class Server(object):
 
         return process.write_config(cfg), cfg
 
-    def __init_mongos(self, params, ssl):
+    def __init_mongos(self, params, add_auth=False):
         cfg = params.copy()
-        cfg.update(ssl)
 
         self.__init_logpath(cfg.get('logpath', None))
 
         # use keyFile
-        if self.auth_key:
+        if add_auth and self.auth_key:
             cfg['keyFile'] = self.__init_auth_key(self.auth_key, tempfile.mkdtemp())
 
         if 'port' not in cfg:
@@ -98,7 +97,8 @@ class Server(object):
 
         return process.write_config(cfg), cfg
 
-    def __init__(self, name, procParams, sslParams={}, auth_key=None, login='', password=''):
+    def __init__(self, name, procParams, sslParams={}, auth_key=None,
+                 login='', password='', auth_source='admin'):
         """Args:
             name - name of process (mongod or mongos)
             procParams - dictionary with params for mongo process
@@ -109,6 +109,7 @@ class Server(object):
         logger.debug("Server.__init__({name}, {procParams}, {sslParams}, {auth_key}, {login}, {password})".format(**locals()))
         self.name = name  # name of process
         self.login = login
+        self.auth_source = auth_source
         self.password = password
         self.auth_key = auth_key
         self.admin_added = False
@@ -118,6 +119,8 @@ class Server(object):
         self.hostname = None  # string like host:port
         self.is_mongos = False
         self.kwargs = {}
+        self.needs_auth = self.login or self.auth_key
+        self.ssl_params = sslParams
 
         if not not sslParams:
             self.kwargs['ssl'] = True
@@ -139,12 +142,12 @@ class Server(object):
     def connection(self):
         """return authenticated connection"""
         c = pymongo.MongoClient(self.hostname, **self.kwargs)
-        if not self.is_mongos and self.admin_added and (self.login and self.password):
+        if not self.is_mongos and self.admin_added and self.needs_auth:
             try:
-                c.admin.authenticate(self.login, self.password)
+                c.admin.authenticate(DEFAULT_USER, DEFAULT_PWD)
             except:
                 logger.exception("Could not authenticate to %s as %s/%s"
-                                 % (self.hostname, self.login, self.password))
+                                 % (self.hostname, DEFAULT_USER, DEFAULT_PWD))
                 raise
         return c
 
@@ -266,20 +269,32 @@ class Server(object):
         except (OSError, TimeoutError):
             logger.exception("Could not start Server.")
             raise
-        if not self.admin_added and self.login:
+        if not self.admin_added and self.needs_auth:
+            # Add secret admin user.
             self._add_auth()
             self.admin_added = True
+            self.stop()
+            self.cfg.update(self.ssl_params)
+
+            init_fn = (self.__init_mongos if self.is_mongos
+                       else self.__init_mongod)
+            # Restart with keyfile, auth, ssl options, etc.
+            self.config_path, self.cfg = init_fn(self.cfg, add_auth=True)
+            self.start()
         return True
 
     def stop(self):
         """stop server"""
         return process.kill_mprocess(self.proc)
 
-    def restart(self, timeout=300):
+    def restart(self, timeout=300, config_callback=None):
         """restart server: stop() and start()
         return status of start command
         """
         self.stop()
+        if config_callback:
+            self.cfg = config_callback(self.cfg.copy())
+            self.config_path = process.write_config(self.cfg)
         return self.start(timeout)
 
     def reset(self):
@@ -290,14 +305,35 @@ class Server(object):
     def _add_auth(self):
         try:
             db = self.connection.admin
-            logger.debug("add admin user {login}/{password}".format(login=self.login, password=self.password))
-            db.add_user(self.login, self.password,
-                        roles=['__system',
-                               'clusterAdmin',
-                               'dbAdminAnyDatabase',
-                               'readWriteAnyDatabase',
-                               'userAdminAnyDatabase'],
-                        writeConcern={'fsync': True})
+
+            # Use auth source as provided by user.
+            db = self.connection[self.auth_source]
+            # Determine authentication mechanism.
+            set_params = self.cfg.get('setParameter', {})
+            auth_mech = set_params.get('authenticationMechanisms', '')
+
+            # Build dict of kwargs to pass to add_user.
+            auth_dict = {
+                'name': DEFAULT_USER, 'writeConcern': {'fsync': True}
+            }
+
+            # Other auth mechanisms that shouldn't get a password?
+            if auth_mech != 'MONGODB-X509':
+                auth_dict['password'] = DEFAULT_PWD
+            logger.debug("add admin user with parameters: %r" % auth_dict)
+            db.add_user(**auth_dict)
+
+            # Authenticate as created user.
+            # Calling connection() always authenticates the right way, and
+            # returns the admin database.
+            db = self.connection.admin
+            # Add secondary user given from request.
+            secondary_login = {
+                'name': self.login, 'writeConcern': {'fsync': True}
+            }
+            if self.password:
+                secondary_login['password'] = self.password
+            db.add_user(**secondary_login)
             db.logout()
         except pymongo.errors.OperationFailure as e:
             logger.error("Error: {0}".format(e))

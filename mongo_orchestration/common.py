@@ -23,6 +23,9 @@ DEFAULT_BIND = os.environ.get('MO_HOST', 'localhost')
 DEFAULT_PORT = int(os.environ.get('MO_PORT', '8889'))
 DEFAULT_SERVER = 'cherrypy'
 
+DEFAULT_USER = 'user'
+DEFAULT_PWD = 'password'
+
 
 def update(d, u):
     for k, v in u.items():
