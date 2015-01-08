@@ -26,10 +26,21 @@ import pymongo
 
 sys.path.insert(0, '../')
 
+from mongo_orchestration.common import DEFAULT_SUBJECT, DEFAULT_CLIENT_CERT
 from mongo_orchestration.servers import Server, Servers
 from mongo_orchestration.process import PortPool
 from nose.plugins.attrib import attr
 from tests import unittest
+
+
+TEST_SUBJECT = (
+    'C=US,ST=New York,L=New York City,O=MongoDB,OU=KernelUser,CN=client_revoked'
+)
+TEST_CERT = os.path.join(os.path.dirname(__file__), 'lib', 'client.pem')
+
+
+def certificate(cert_name):
+    return os.path.join(os.path.dirname(__file__), 'lib', cert_name)
 
 
 @attr('servers')
@@ -188,7 +199,7 @@ class ServerTestCase(unittest.TestCase):
     def tearDown(self):
         if hasattr(self, 'server'):
             self.server.stop()
-            self.server.cleanup()
+#            self.server.cleanup()
 
     def test_server(self):
         self.assertTrue(isinstance(self.server, Server))
@@ -324,6 +335,36 @@ class ServerTestCase(unittest.TestCase):
         self.server.reset()
         # No ConnectionFailure.
         pymongo.MongoClient(self.server.hostname)
+
+    def test_ssl_auth(self):
+        self.server.stop()
+        proc_params = {
+            'setParameter': {
+                'authenticationMechanisms': 'MONGODB-X509'
+            },
+            'logpath': '/Users/luke/code/mongo-orchestration/ssl-auth.log'
+        }
+        ssl_params = {
+            'sslPEMKeyFile': certificate('server.pem'),
+            'sslCAFile': certificate('ca.pem'),
+            'sslMode': 'requireSSL',
+            'sslAllowInvalidCertificates': True
+        }
+        # Should not raise an Exception.
+        self.server = Server(
+            'mongod', proc_params, ssl_params,
+            login=TEST_SUBJECT, auth_source='$external')
+        self.server.start()
+        # Should create an extra user. Doesn't raise.
+        client = pymongo.MongoClient(
+            self.server.hostname, ssl_certfile=DEFAULT_CLIENT_CERT)
+        client['$external'].authenticate(
+            DEFAULT_SUBJECT, mechanism='MONGODB-X509')
+        # Should also create the user we requested. Doesn't raise.
+        client = pymongo.MongoClient(
+            self.server.hostname, ssl_certfile=TEST_CERT)
+        client['$external'].authenticate(
+            TEST_SUBJECT, mechanism='MONGODB-X509')
 
 
 @attr('servers')

@@ -27,7 +27,7 @@ from uuid import uuid4
 import pymongo
 
 from mongo_orchestration import process
-from mongo_orchestration.common import DEFAULT_USER, DEFAULT_PWD
+from mongo_orchestration.common import DEFAULT_SUBJECT, DEFAULT_CLIENT_CERT
 from mongo_orchestration.errors import ServersError, TimeoutError
 from mongo_orchestration.singleton import Singleton
 from mongo_orchestration.container import Container
@@ -122,16 +122,13 @@ class Server(object):
         self.needs_auth = self.login or self.auth_key
         self.ssl_params = sslParams
 
-        if not not sslParams:
-            self.kwargs['ssl'] = True
-
         proc_name = os.path.split(name)[1].lower()
         if proc_name.startswith('mongod'):
-            self.config_path, self.cfg = self.__init_mongod(procParams, sslParams)
+            self.config_path, self.cfg = self.__init_mongod(procParams)
 
         elif proc_name.startswith('mongos'):
             self.is_mongos = True
-            self.config_path, self.cfg = self.__init_mongos(procParams, sslParams)
+            self.config_path, self.cfg = self.__init_mongos(procParams)
 
         else:
             self.config_path, self.cfg = None, {}
@@ -142,12 +139,18 @@ class Server(object):
     def connection(self):
         """return authenticated connection"""
         c = pymongo.MongoClient(self.hostname, **self.kwargs)
+        db = c[self.auth_source]
         if not self.is_mongos and self.admin_added and self.needs_auth:
+            if self.x509_extra_user:
+                auth_dict = {
+                    'name': DEFAULT_SUBJECT, 'mechanism': 'MONGODB-X509'}
+            else:
+                auth_dict = {'name': self.login, 'password': self.password}
             try:
-                c.admin.authenticate(DEFAULT_USER, DEFAULT_PWD)
+                db.authenticate(**auth_dict)
             except:
-                logger.exception("Could not authenticate to %s as %s/%s"
-                                 % (self.hostname, DEFAULT_USER, DEFAULT_PWD))
+                logger.exception("Could not authenticate to %s with %r"
+                                 % (self.hostname, auth_dict))
                 raise
         return c
 
@@ -274,11 +277,13 @@ class Server(object):
             self._add_auth()
             self.admin_added = True
             self.stop()
-            self.cfg.update(self.ssl_params)
+            # Fix kwargs to MongoClient.
+            self.kwargs['ssl'] = bool(self.ssl_params)
 
+            # Restart with keyfile, auth, ssl options, etc.
+            self.cfg.update(self.ssl_params)
             init_fn = (self.__init_mongos if self.is_mongos
                        else self.__init_mongod)
-            # Restart with keyfile, auth, ssl options, etc.
             self.config_path, self.cfg = init_fn(self.cfg, add_auth=True)
             self.start()
         return True
@@ -308,33 +313,48 @@ class Server(object):
 
             # Use auth source as provided by user.
             db = self.connection[self.auth_source]
-            # Determine authentication mechanism.
+            # Determine authentication mechanisms.
             set_params = self.cfg.get('setParameter', {})
-            auth_mech = set_params.get('authenticationMechanisms', '')
+            auth_mechs = set_params.get(
+                'authenticationMechanisms', '').split(',')
 
-            # Build dict of kwargs to pass to add_user.
-            auth_dict = {
-                'name': DEFAULT_USER, 'writeConcern': {'fsync': True}
-            }
+            # We need to add an additional user if MONGODB-X509 is the only auth
+            # mechanism.
+            self.x509_extra_user = False
+            if len(auth_mechs) == 1 and auth_mechs[0] == 'MONGODB-X509':
+                self.x509_extra_user = True
 
-            # Other auth mechanisms that shouldn't get a password?
-            if auth_mech != 'MONGODB-X509':
-                auth_dict['password'] = DEFAULT_PWD
-            logger.debug("add admin user with parameters: %r" % auth_dict)
-            db.add_user(**auth_dict)
+            roles = [
+                {'role': 'userAdminAnyDatabase', 'db': 'admin'},
+                {'role': 'clusterAdmin', 'db': 'admin'},
+                {'role': 'dbAdminAnyDatabase', 'db': 'admin'},
+                {'role': 'readWriteAnyDatabase', 'db': 'admin'}
+            ]
 
-            # Authenticate as created user.
-            # Calling connection() always authenticates the right way, and
-            # returns the admin database.
-            db = self.connection.admin
+            if self.x509_extra_user:
+                # Build dict of kwargs to pass to add_user.
+                auth_dict = {
+                    'name': DEFAULT_SUBJECT,
+                    'writeConcern': {'fsync': True},
+                    'roles': roles
+                }
+                logger.debug(
+                    "add extra x509 user with parameters: %r" % auth_dict)
+                db.add_user(**auth_dict)
+#                import pdb; pdb.set_trace()
+                # Fix kwargs to MongoClient.
+                self.kwargs['ssl_certfile'] = DEFAULT_CLIENT_CERT
+
             # Add secondary user given from request.
             secondary_login = {
-                'name': self.login, 'writeConcern': {'fsync': True}
+                'name': self.login,
+                'writeConcern': {'fsync': True},
+                'roles': roles
             }
             if self.password:
                 secondary_login['password'] = self.password
             db.add_user(**secondary_login)
-            db.logout()
+
         except pymongo.errors.OperationFailure as e:
             logger.error("Error: {0}".format(e))
             # user added successfuly but OperationFailure exception raises
@@ -362,7 +382,8 @@ class Servers(Singleton, Container):
 
     def create(self, name, procParams, sslParams={},
                auth_key=None, login=None, password=None,
-               timeout=300, autostart=True, server_id=None, version=None):
+               auth_source='admin', timeout=300, autostart=True,
+               server_id=None, version=None):
         """create new server
         Args:
            name - process name or path
@@ -382,8 +403,9 @@ class Servers(Singleton, Container):
             raise ServersError("Server with id %s already exists." % server_id)
 
         bin_path = self.bin_path(version)
+        import pdb; pdb.set_trace()
         server = Server(os.path.join(bin_path, name), procParams, sslParams,
-                        auth_key, login, password)
+                        auth_key, login, password, auth_source)
         if autostart:
             server.start(timeout)
         self[server_id] = server

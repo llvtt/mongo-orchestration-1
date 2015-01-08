@@ -23,8 +23,16 @@ DEFAULT_BIND = os.environ.get('MO_HOST', 'localhost')
 DEFAULT_PORT = int(os.environ.get('MO_PORT', '8889'))
 DEFAULT_SERVER = 'cherrypy'
 
-DEFAULT_USER = 'user'
-DEFAULT_PWD = 'password'
+# Username for included client x509 certificate.
+DEFAULT_SUBJECT = (
+    'C=US,ST=New York,L=New York City,O=MongoDB,OU=KernelUser,CN=client'
+)
+DEFAULT_CLIENT_CERT = os.path.join(
+    os.environ.get(
+        'MONGO_ORCHESTRATION_HOME', os.path.dirname(__file__)),
+    'lib',
+    'client.pem'
+)
 
 
 def update(d, u):
