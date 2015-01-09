@@ -60,9 +60,6 @@ class ReplicaSet(object):
         self.needs_auth = self.auth_key or self.login
         self.admin_added = False
 
-        # if not not self.sslParams:
-        #     self.kwargs['ssl'] = True
-
         members = rs_params.get('members', {})
         config = {"_id": self.repl_id, "members": [
             self.member_create(member, index)
@@ -107,7 +104,6 @@ class ReplicaSet(object):
                 logger.debug(
                     "add extra x509 user with parameters: %r" % auth_dict)
                 db.add_user(**auth_dict)
-                self.kwargs['ssl_certfile'] = DEFAULT_CLIENT_CERT
 
             # Add secondary user given from request.
             secondary_login = {
@@ -133,6 +129,8 @@ class ReplicaSet(object):
                     server.auth_source = self.auth_source
                 server.needs_auth = self.needs_auth
                 server.ssl_params = self.sslParams
+                server.login = self.login
+                server.password = self.password
                 server.admin_added = self.admin_added
                 server.cfg.update(self.sslParams)
                 if self.auth_key:
@@ -140,7 +138,9 @@ class ReplicaSet(object):
                 server.cfg.update(member.get('procParams', {}))
                 server.restart()
 
-        self.kwargs['ssl'] = bool(self.sslParams)
+        if self.sslParams:
+            self.kwargs['ssl'] = True
+            self.kwargs['ssl_certfile'] = DEFAULT_CLIENT_CERT
 
         # Wait again?
         if not self.waiting_config_state():

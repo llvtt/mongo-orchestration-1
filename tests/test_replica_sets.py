@@ -618,6 +618,7 @@ class ReplicaSetTestCase(unittest.TestCase):
             # No ConnectionFailure/AutoReconnect.
             pymongo.MongoClient(host)
 
+    # TODO: disable test if server doesn't have ssl.
     def test_ssl_auth(self):
         member_params = {
             'procParams': {
@@ -651,6 +652,38 @@ class ReplicaSetTestCase(unittest.TestCase):
             self.repl.primary(), ssl_certfile=certificate('client.pem'))
         client['$external'].authenticate(
             TEST_SUBJECT, mechanism='MONGODB-X509')
+
+    # TODO: disable if server doesn't have ssl support/pymongo doesn't do scram.
+    def test_scram_with_ssl(self):
+        member_params = {
+            'procParams': {
+                'clusterAuthMode': 'x509',
+                'setParameter': {
+                    'authenticationMechanisms': 'MONGODB-X509,SCRAM-SHA-1'}
+            }
+        }
+        self.repl_cfg = {
+            'login': 'luke',
+            'password': 'ekul',
+            'members': [member_params, member_params],
+            'sslParams': {
+                'sslCAFile': certificate('ca.pem'),
+                'sslPEMKeyFile': certificate('server.pem'),
+                'sslMode': 'requireSSL',
+                'sslClusterFile': certificate('cluster_cert.pem'),
+                'sslAllowInvalidCertificates': True
+            }
+        }
+        # Should not raise an Exception.
+        self.repl = ReplicaSet(self.repl_cfg)
+
+        # Should create the user we requested. No raise on authenticate.
+        client = pymongo.MongoClient(
+            self.repl.primary(), ssl_certfile=certificate('client.pem'))
+        client.admin.authenticate('luke', 'ekul')
+        # This should be the only user.
+        self.assertEqual(len(client.admin.command('usersInfo')['users']), 1)
+        self.assertFalse(client['$external'].command('usersInfo')['users'])
 
 
 @attr('rs')
