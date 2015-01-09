@@ -30,17 +30,7 @@ from mongo_orchestration.common import DEFAULT_SUBJECT, DEFAULT_CLIENT_CERT
 from mongo_orchestration.servers import Server, Servers
 from mongo_orchestration.process import PortPool
 from nose.plugins.attrib import attr
-from tests import unittest
-
-
-TEST_SUBJECT = (
-    'C=US,ST=New York,L=New York City,O=MongoDB,OU=KernelUser,CN=client_revoked'
-)
-TEST_CERT = os.path.join(os.path.dirname(__file__), 'lib', 'client.pem')
-
-
-def certificate(cert_name):
-    return os.path.join(os.path.dirname(__file__), 'lib', cert_name)
+from tests import certificate, unittest, TEST_SUBJECT
 
 
 @attr('servers')
@@ -362,7 +352,7 @@ class ServerTestCase(unittest.TestCase):
             DEFAULT_SUBJECT, mechanism='MONGODB-X509')
         # Should also create the user we requested. Doesn't raise.
         client = pymongo.MongoClient(
-            self.server.hostname, ssl_certfile=TEST_CERT)
+            self.server.hostname, ssl_certfile=certificate('client.pem'))
         client['$external'].authenticate(
             TEST_SUBJECT, mechanism='MONGODB-X509')
 

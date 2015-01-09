@@ -24,11 +24,13 @@ import pymongo
 
 sys.path.insert(0, '../')
 
+from mongo_orchestration.common import DEFAULT_SUBJECT, DEFAULT_CLIENT_CERT
 from mongo_orchestration.replica_sets import ReplicaSet, ReplicaSets
 from mongo_orchestration.servers import Servers
 from mongo_orchestration.process import PortPool
 from nose.plugins.attrib import attr
-from tests import unittest, assert_eventually, HOSTNAME
+from tests import (
+    certificate, TEST_SUBJECT, unittest, assert_eventually, HOSTNAME)
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -615,6 +617,40 @@ class ReplicaSetTestCase(unittest.TestCase):
         for host in all_hosts:
             # No ConnectionFailure/AutoReconnect.
             pymongo.MongoClient(host)
+
+    def test_ssl_auth(self):
+        member_params = {
+            'procParams': {
+                'clusterAuthMode': 'x509',
+                'setParameter': {'authenticationMechanisms': 'MONGODB-X509'}
+            }
+        }
+        self.repl_cfg = {
+            'login': TEST_SUBJECT,
+            'authSource': '$external',
+            'members': [member_params, member_params],
+            'sslParams': {
+                'sslCAFile': certificate('ca.pem'),
+                'sslPEMKeyFile': certificate('server.pem'),
+                'sslMode': 'requireSSL',
+                'sslClusterFile': certificate('cluster_cert.pem'),
+                'sslAllowInvalidCertificates': True
+            }
+        }
+        # Should not raise an Exception.
+        self.repl = ReplicaSet(self.repl_cfg)
+
+        # Should create an extra user. No raise on authenticate.
+        client = pymongo.MongoClient(
+            self.repl.primary(), ssl_certfile=DEFAULT_CLIENT_CERT)
+        client['$external'].authenticate(
+            DEFAULT_SUBJECT, mechanism='MONGODB-X509')
+
+        # Should create the user we requested. No raise on authenticate.
+        client = pymongo.MongoClient(
+            self.repl.primary(), ssl_certfile=certificate('client.pem'))
+        client['$external'].authenticate(
+            TEST_SUBJECT, mechanism='MONGODB-X509')
 
 
 @attr('rs')

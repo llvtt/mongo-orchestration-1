@@ -21,6 +21,9 @@ PORT = int(os.environ.get('MO_PORT', '8889'))
 HOSTNAME = socket.getaddrinfo(
     os.environ.get('MO_HOST', '127.0.0.1'), PORT,
     socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)[-1][-1][0]
+TEST_SUBJECT = (
+    'C=US,ST=New York,L=New York City,O=MongoDB,OU=KernelUser,CN=client_revoked'
+)
 
 
 if sys.version_info[:2] == (2, 6):
@@ -29,6 +32,11 @@ if sys.version_info[:2] == (2, 6):
 else:
     import unittest
     from unittest import SkipTest
+
+
+def certificate(cert_name):
+    """Return the path to the PEM file with the given name."""
+    return os.path.join(os.path.dirname(__file__), 'lib', cert_name)
 
 
 def assert_eventually(condition, message=None, max_tries=60):
