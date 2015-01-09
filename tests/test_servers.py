@@ -380,6 +380,23 @@ class ServerTestCase(unittest.TestCase):
         self.assertEqual(len(client.admin.command('usersInfo')['users']), 1)
         self.assertFalse(client['$external'].command('usersInfo')['users'])
 
+    def test_ssl(self):
+        ssl_params = {
+            'sslPEMKeyFile': certificate('server.pem'),
+            'sslCAFile': certificate('ca.pem'),
+            'sslMode': 'requireSSL',
+            'sslAllowInvalidCertificates': True
+        }
+        # Should not raise an Exception.
+        self.server = Server('mongod', {}, ssl_params)
+        self.server.start()
+        # Server should require SSL.
+        self.assertRaises(pymongo.errors.ConnectionFailure,
+                          pymongo.MongoClient, self.server.hostname)
+        # Doesn't raise with certificate provided.
+        pymongo.MongoClient(
+            self.server.hostname, ssl_certfile=certificate('client.pem'))
+
 
 @attr('servers')
 @attr('auth')

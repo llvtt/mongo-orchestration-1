@@ -685,6 +685,28 @@ class ReplicaSetTestCase(unittest.TestCase):
         self.assertEqual(len(client.admin.command('usersInfo')['users']), 1)
         self.assertFalse(client['$external'].command('usersInfo')['users'])
 
+    def test_ssl(self):
+        member_params = {}  # {'procParams': {'clusterAuthMode': 'x509'}}
+        self.repl_cfg = {
+            'members': [member_params, member_params],
+            'sslParams': {
+                'sslCAFile': certificate('ca.pem'),
+                'sslPEMKeyFile': certificate('server.pem'),
+                'sslMode': 'requireSSL',
+                'sslClusterFile': certificate('cluster_cert.pem'),
+                'sslAllowInvalidCertificates': True
+            }
+        }
+        # Should not raise an Exception.
+        self.repl = ReplicaSet(self.repl_cfg)
+
+        # Server should require SSL.
+        self.assertRaises(pymongo.errors.ConnectionFailure,
+                          pymongo.MongoClient, self.repl.primary())
+        # This shouldn't raise.
+        pymongo.MongoClient(
+            self.repl.primary(), ssl_certfile=certificate('client.pem'))
+
 
 @attr('rs')
 @attr('test')

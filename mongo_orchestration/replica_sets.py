@@ -57,8 +57,8 @@ class ReplicaSet(object):
 
         self.sslParams = rs_params.get('sslParams', {})
         self.kwargs = {}
-        self.needs_auth = self.auth_key or self.login
-        self.admin_added = False
+        self.restart_required = self.login or self.sslParams or self.auth_key
+        self.x509_extra_user = False
 
         members = rs_params.get('members', {})
         config = {"_id": self.repl_id, "members": [
@@ -76,7 +76,6 @@ class ReplicaSet(object):
 
         if self.login:
             # Do we need to add an extra x509 user?
-            self.x509_extra_user = False
             for member in members:
                 proc_params = member.get('procParams', {})
                 set_params = proc_params.get('setParameter', {})
@@ -115,9 +114,7 @@ class ReplicaSet(object):
                 secondary_login['password'] = self.password
             db.add_user(**secondary_login)
 
-            self.admin_added = True
-
-        if self.needs_auth:
+        if self.restart_required:
             # Restart all the servers with auth flags and ssl.
             for idx, member in enumerate(members):
                 server_id = self._servers.id_by_hostname(self.id2host(idx))
@@ -127,16 +124,16 @@ class ReplicaSet(object):
                     server.kwargs['ssl_certfile'] = DEFAULT_CLIENT_CERT
                     server.x509_extra_user = self.x509_extra_user
                     server.auth_source = self.auth_source
-                server.needs_auth = self.needs_auth
                 server.ssl_params = self.sslParams
                 server.login = self.login
                 server.password = self.password
-                server.admin_added = self.admin_added
                 server.cfg.update(self.sslParams)
                 if self.auth_key:
                     server.cfg['keyFile'] = key_file(self.auth_key)
                 server.cfg.update(member.get('procParams', {}))
+                server.restart_required = False  # necessary?
                 server.restart()
+            self.restart_required = False
 
         if self.sslParams:
             self.kwargs['ssl'] = True
@@ -355,7 +352,7 @@ class ReplicaSet(object):
         if server_info['procInfo']['alive']:
             # Can't call serverStatus on arbiter when running with auth enabled.
             # (SERVER-5479)
-            if self.needs_auth:
+            if self.login or self.auth_key:
                 arbiter_ids = map(lambda member: member['_id'], self.arbiters())
                 if member_id in arbiter_ids:
                     result['rsInfo'] = {
@@ -414,7 +411,7 @@ class ReplicaSet(object):
                 if hostname is None:
                     c = pymongo.MongoReplicaSetClient(servers, replicaSet=self.repl_id, read_preference=read_preference, socketTimeoutMS=20000, **self.kwargs)
                     if c.primary:
-                        if self.login and self.admin_added:
+                        if self.login and not self.restart_required:
                             try:
                                 db = c[self.auth_source]
                                 if self.x509_extra_user:
@@ -435,7 +432,7 @@ class ReplicaSet(object):
                 else:
                     logger.debug("connection to the {servers}".format(**locals()))
                     c = pymongo.MongoClient(servers, socketTimeoutMS=20000, **self.kwargs)
-                    if self.login and self.admin_added:
+                    if self.login and not self.restart_required:
                         try:
                             db = c[self.auth_source]
                             if self.x509_extra_user:
