@@ -266,7 +266,6 @@ class Server(object):
             logger.exception("Could not start Server.")
             raise
         if not self.admin_added and self.needs_auth:
-            # Add secret admin user.
             self._add_auth()
             self.admin_added = True
             self.stop()

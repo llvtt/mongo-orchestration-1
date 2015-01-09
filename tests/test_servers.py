@@ -189,7 +189,7 @@ class ServerTestCase(unittest.TestCase):
     def tearDown(self):
         if hasattr(self, 'server'):
             self.server.stop()
-#            self.server.cleanup()
+            self.server.cleanup()
 
     def test_server(self):
         self.assertTrue(isinstance(self.server, Server))
@@ -326,13 +326,12 @@ class ServerTestCase(unittest.TestCase):
         # No ConnectionFailure.
         pymongo.MongoClient(self.server.hostname)
 
+    # TODO: disable if server doesn't have ssl support.
     def test_ssl_auth(self):
-        self.server.stop()
         proc_params = {
             'setParameter': {
                 'authenticationMechanisms': 'MONGODB-X509'
-            },
-            'logpath': '/Users/luke/code/mongo-orchestration/ssl-auth.log'
+            }
         }
         ssl_params = {
             'sslPEMKeyFile': certificate('server.pem'),
@@ -355,6 +354,32 @@ class ServerTestCase(unittest.TestCase):
             self.server.hostname, ssl_certfile=certificate('client.pem'))
         client['$external'].authenticate(
             TEST_SUBJECT, mechanism='MONGODB-X509')
+
+    # TODO: disable if server doesn't have ssl support/pymongo doesn't do scram.
+    def test_scram_with_ssl(self):
+        proc_params = {
+            'setParameter': {
+                'authenticationMechanisms': 'MONGODB-X509,SCRAM-SHA-1'
+            }
+        }
+        ssl_params = {
+            'sslPEMKeyFile': certificate('server.pem'),
+            'sslCAFile': certificate('ca.pem'),
+            'sslMode': 'requireSSL',
+            'sslAllowInvalidCertificates': True
+        }
+        # Should not raise an Exception.
+        self.server = Server(
+            'mongod', proc_params, ssl_params, login='luke', password='ekul')
+        import pdb; pdb.set_trace()
+        self.server.start()
+        # Should create the user we requested. No raise on authenticate.
+        client = pymongo.MongoClient(
+            self.server.hostname, ssl_certfile=certificate('client.pem'))
+        client.admin.authenticate('luke', 'ekul')
+        # This should be the only user.
+        self.assertEqual(len(client.admin.command('usersInfo')['users']), 1)
+        self.assertFalse(client['$external'].command('usersInfo')['users'])
 
 
 @attr('servers')
