@@ -18,7 +18,6 @@ import errno
 import logging
 import os
 import platform
-import stat
 import tempfile
 import time
 
@@ -27,7 +26,8 @@ from uuid import uuid4
 import pymongo
 
 from mongo_orchestration import process
-from mongo_orchestration.common import DEFAULT_SUBJECT, DEFAULT_CLIENT_CERT
+from mongo_orchestration.common import (
+    key_file, DEFAULT_SUBJECT, DEFAULT_CLIENT_CERT)
 from mongo_orchestration.errors import ServersError, TimeoutError
 from mongo_orchestration.singleton import Singleton
 from mongo_orchestration.container import Container
@@ -48,13 +48,6 @@ class Server(object):
             os.makedirs(dbpath)
         return dbpath
 
-    def __init_auth_key(self, auth_key, folder):
-        key_file = os.path.join(os.path.join(folder, 'key'))
-        with open(key_file, 'w') as fd:
-            fd.write(auth_key)
-        os.chmod(key_file, stat.S_IRUSR)
-        return key_file
-
     def __init_logpath(self, log_path):
         if log_path and not os.path.exists(os.path.dirname(log_path)):
             os.makedirs(log_path)
@@ -69,7 +62,7 @@ class Server(object):
         # use keyFile
         if add_auth and self.auth_key:
             cfg['auth'] = True
-            cfg['keyFile'] = self.__init_auth_key(self.auth_key, cfg['dbpath'])
+            cfg['keyFile'] = key_file(self.auth_key)
 
         if add_auth and self.login:
             cfg['auth'] = True
@@ -90,7 +83,7 @@ class Server(object):
 
         # use keyFile
         if add_auth and self.auth_key:
-            cfg['keyFile'] = self.__init_auth_key(self.auth_key, tempfile.mkdtemp())
+            cfg['keyFile'] = key_file(self.auth_key)
 
         if 'port' not in cfg:
             cfg['port'] = process.PortPool().port(check=True)
@@ -211,7 +204,7 @@ class Server(object):
         status_info = {}
         if self.hostname and self.cfg.get('port', None):
             try:
-                c = pymongo.MongoClient(self.hostname.split(':')[0], self.cfg['port'], socketTimeoutMS=120000, **self.kwargs)
+                c = self.connection
                 server_info = c.server_info()
                 logger.debug("server_info: {server_info}".format(**locals()))
                 mongodb_uri = 'mongodb://' + self.hostname
@@ -277,8 +270,6 @@ class Server(object):
             self._add_auth()
             self.admin_added = True
             self.stop()
-            # Fix kwargs to MongoClient.
-            self.kwargs['ssl'] = bool(self.ssl_params)
 
             # Restart with keyfile, auth, ssl options, etc.
             self.cfg.update(self.ssl_params)
@@ -286,20 +277,22 @@ class Server(object):
                        else self.__init_mongod)
             self.config_path, self.cfg = init_fn(self.cfg, add_auth=True)
             self.start()
+
+        # Fix kwargs to MongoClient.
+        self.kwargs['ssl'] = bool(self.ssl_params)
+
         return True
 
     def stop(self):
         """stop server"""
         return process.kill_mprocess(self.proc)
 
-    def restart(self, timeout=300, config_callback=None):
+    def restart(self, timeout=300):
         """restart server: stop() and start()
         return status of start command
         """
         self.stop()
-        if config_callback:
-            self.cfg = config_callback(self.cfg.copy())
-            self.config_path = process.write_config(self.cfg)
+        self.config_path = process.write_config(self.cfg)
         return self.start(timeout)
 
     def reset(self):
@@ -341,7 +334,6 @@ class Server(object):
                 logger.debug(
                     "add extra x509 user with parameters: %r" % auth_dict)
                 db.add_user(**auth_dict)
-#                import pdb; pdb.set_trace()
                 # Fix kwargs to MongoClient.
                 self.kwargs['ssl_certfile'] = DEFAULT_CLIENT_CERT
 
@@ -403,13 +395,15 @@ class Servers(Singleton, Container):
             raise ServersError("Server with id %s already exists." % server_id)
 
         bin_path = self.bin_path(version)
-        import pdb; pdb.set_trace()
         server = Server(os.path.join(bin_path, name), procParams, sslParams,
                         auth_key, login, password, auth_source)
         if autostart:
             server.start(timeout)
         self[server_id] = server
         return server_id
+
+    def restart(self, server_id, timeout=300, config_callback=None):
+        self._storage[server_id].restart(timeout, config_callback)
 
     def remove(self, server_id):
         """remove server and data stuff

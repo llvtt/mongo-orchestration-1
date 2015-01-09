@@ -15,9 +15,11 @@
 # limitations under the License.
 
 import collections
-import json
-import os
 import copy
+import os
+import json
+import stat
+import tempfile
 
 DEFAULT_BIND = os.environ.get('MO_HOST', 'localhost')
 DEFAULT_PORT = int(os.environ.get('MO_PORT', '8889'))
@@ -33,6 +35,14 @@ DEFAULT_CLIENT_CERT = os.path.join(
     'lib',
     'client.pem'
 )
+
+
+def key_file(self, auth_key):
+    key_file_path = os.path.join(tempfile.mkdtemp(), 'key')
+    with open(key_file_path, 'w') as fd:
+        fd.write(auth_key)
+    os.chmod(key_file_path, stat.S_IRUSR)
+    return key_file
 
 
 def update(d, u):
