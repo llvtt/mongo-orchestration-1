@@ -371,7 +371,6 @@ class ServerTestCase(unittest.TestCase):
         # Should not raise an Exception.
         self.server = Server(
             'mongod', proc_params, ssl_params, login='luke', password='ekul')
-        import pdb; pdb.set_trace()
         self.server.start()
         # Should create the user we requested. No raise on authenticate.
         client = pymongo.MongoClient(

@@ -105,15 +105,14 @@ class Server(object):
         self.auth_source = auth_source
         self.password = password
         self.auth_key = auth_key
-        self.admin_added = False
         self.pid = None  # process pid
         self.proc = None # Popen object
         self.host = None  # hostname without port
         self.hostname = None  # string like host:port
         self.is_mongos = False
         self.kwargs = {}
-        self.needs_auth = self.login or self.auth_key
         self.ssl_params = sslParams
+        self.restart_required = self.login or self.ssl_params or self.auth_key
 
         proc_name = os.path.split(name)[1].lower()
         if proc_name.startswith('mongod'):
@@ -133,7 +132,7 @@ class Server(object):
         """return authenticated connection"""
         c = pymongo.MongoClient(self.hostname, **self.kwargs)
         db = c[self.auth_source]
-        if not self.is_mongos and self.admin_added and self.needs_auth:
+        if not self.is_mongos and self.login and not self.restart_required:
             if self.x509_extra_user:
                 auth_dict = {
                     'name': DEFAULT_SUBJECT, 'mechanism': 'MONGODB-X509'}
@@ -265,9 +264,9 @@ class Server(object):
         except (OSError, TimeoutError):
             logger.exception("Could not start Server.")
             raise
-        if not self.admin_added and self.needs_auth:
-            self._add_auth()
-            self.admin_added = True
+        if self.restart_required:
+            if self.login:
+                self._add_auth()
             self.stop()
 
             # Restart with keyfile, auth, ssl options, etc.
@@ -275,10 +274,11 @@ class Server(object):
             init_fn = (self.__init_mongos if self.is_mongos
                        else self.__init_mongod)
             self.config_path, self.cfg = init_fn(self.cfg, add_auth=True)
+            self.restart_required = False
+            if self.ssl_params:
+                self.kwargs['ssl'] = True
+                self.kwargs['ssl_certfile'] = DEFAULT_CLIENT_CERT
             self.start()
-
-        # Fix kwargs to MongoClient.
-        self.kwargs['ssl'] = bool(self.ssl_params)
 
         return True
 
