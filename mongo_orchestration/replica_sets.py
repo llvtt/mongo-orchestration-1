@@ -57,8 +57,12 @@ class ReplicaSet(object):
 
         self.sslParams = rs_params.get('sslParams', {})
         self.kwargs = {}
-        self.restart_required = self.login or self.sslParams or self.auth_key
+        self.restart_required = self.login or self.auth_key
         self.x509_extra_user = False
+
+        if self.sslParams:
+            self.kwargs['ssl'] = True
+            self.kwargs['ssl_certfile'] = DEFAULT_CLIENT_CERT
 
         members = rs_params.get('members', {})
         config = {"_id": self.repl_id, "members": [
@@ -119,11 +123,8 @@ class ReplicaSet(object):
             for idx, member in enumerate(members):
                 server_id = self._servers.id_by_hostname(self.id2host(idx))
                 server = self._servers._storage[server_id]
-                if self.sslParams:
-                    server.kwargs['ssl'] = True
-                    server.kwargs['ssl_certfile'] = DEFAULT_CLIENT_CERT
-                    server.x509_extra_user = self.x509_extra_user
-                    server.auth_source = self.auth_source
+                server.x509_extra_user = self.x509_extra_user
+                server.auth_source = self.auth_source
                 server.ssl_params = self.sslParams
                 server.login = self.login
                 server.password = self.password
@@ -134,10 +135,6 @@ class ReplicaSet(object):
                 server.restart_required = False  # necessary?
                 server.restart()
             self.restart_required = False
-
-        if self.sslParams:
-            self.kwargs['ssl'] = True
-            self.kwargs['ssl_certfile'] = DEFAULT_CLIENT_CERT
 
         # Wait again?
         if not self.waiting_config_state():
@@ -306,6 +303,7 @@ class ReplicaSet(object):
         server_id = self._servers.create(
             name='mongod',
             procParams=proc_params,
+            sslParams=self.sslParams,
             version=self._version
         )
         member_config.update({"_id": member_id,

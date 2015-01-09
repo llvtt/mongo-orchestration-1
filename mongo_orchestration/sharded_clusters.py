@@ -46,11 +46,11 @@ class ShardedCluster(object):
 
         self.sslParams = params.get('sslParams', {})
         self.kwargs = {}
+        self.restart_required = self.login or self.auth_key or self.sslParams
+        self.x509_extra_user = False
 
-        if not not self.sslParams:
-            self.kwargs['ssl'] = True
-
-        self.__init_configsvr(params.get('configsvrs', [{}]))
+        configsvr_params = params.get('configsvrs', [{}])
+        self.__init_configsvr(configsvr_params)
         for r in params.get('routers', [{}]):
             self.router_add(r)
         for cfg in params.get('shards', []):

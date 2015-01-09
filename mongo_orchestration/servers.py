@@ -112,9 +112,14 @@ class Server(object):
         self.is_mongos = False
         self.kwargs = {}
         self.ssl_params = sslParams
-        self.restart_required = self.login or self.ssl_params or self.auth_key
+        self.restart_required = self.login or self.auth_key
+
+        if self.ssl_params:
+            self.kwargs['ssl'] = True
+            self.kwargs['ssl_certfile'] = DEFAULT_CLIENT_CERT
 
         proc_name = os.path.split(name)[1].lower()
+        procParams.update(sslParams)
         if proc_name.startswith('mongod'):
             self.config_path, self.cfg = self.__init_mongod(procParams)
 
@@ -269,15 +274,11 @@ class Server(object):
                 self._add_auth()
             self.stop()
 
-            # Restart with keyfile, auth, ssl options, etc.
-            self.cfg.update(self.ssl_params)
+            # Restart with keyfile and auth.
             init_fn = (self.__init_mongos if self.is_mongos
                        else self.__init_mongod)
             self.config_path, self.cfg = init_fn(self.cfg, add_auth=True)
             self.restart_required = False
-            if self.ssl_params:
-                self.kwargs['ssl'] = True
-                self.kwargs['ssl_certfile'] = DEFAULT_CLIENT_CERT
             self.start()
 
         return True
