@@ -125,7 +125,6 @@ class ReplicaSet(object):
                 server = self._servers._storage[server_id]
                 server.x509_extra_user = self.x509_extra_user
                 server.auth_source = self.auth_source
-                server.ssl_params = self.sslParams
                 server.login = self.login
                 server.password = self.password
                 server.cfg.update(self.sslParams)

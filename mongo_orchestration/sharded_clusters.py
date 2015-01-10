@@ -19,6 +19,8 @@ import tempfile
 
 from uuid import uuid4
 
+from mongo_orchestration.common import (
+    key_file, DEFAULT_SUBJECT, DEFAULT_CLIENT_CERT)
 from mongo_orchestration.container import Container
 from mongo_orchestration.errors import ShardedClusterError
 from mongo_orchestration.servers import Servers
@@ -38,6 +40,7 @@ class ShardedCluster(object):
         self.login = params.get('login', '')
         self.password = params.get('password', '')
         self.auth_key = params.get('auth_key', None)
+        self.auth_source = params.get('authSource', 'admin')
         self._version = params.get('version')
         self._configsvrs = []
         self._routers = []
@@ -46,11 +49,15 @@ class ShardedCluster(object):
 
         self.sslParams = params.get('sslParams', {})
         self.kwargs = {}
-        self.restart_required = self.login or self.auth_key or self.sslParams
+        self.restart_required = self.login or self.auth_key
         self.x509_extra_user = False
 
-        configsvr_params = params.get('configsvrs', [{}])
-        self.__init_configsvr(configsvr_params)
+        if self.sslParams:
+            self.kwargs['ssl'] = True
+            self.kwargs['ssl_certfile'] = DEFAULT_CLIENT_CERT
+
+        configsvr_configs = params.get('configsvrs', [{}])
+        self.__init_configsvr(configsvr_configs)
         for r in params.get('routers', [{}]):
             self.router_add(r)
         for cfg in params.get('shards', []):
@@ -68,23 +75,121 @@ class ShardedCluster(object):
                     {'$addToSet': {'$each': self.tags[sh_id]}})
 
         if self.login:
-            client = MongoClient(self.router['hostname'], **self.kwargs)
-            client.admin.add_user(self.login, self.password,
-                                  roles=['__system',
-                                         'clusterAdmin',
-                                         'dbAdminAnyDatabase',
-                                         'readWriteAnyDatabase',
-                                         'userAdminAnyDatabase'])
+            # Do we need to add an extra x509 user?
+            def only_x509(config):
+                set_params = config.get('setParameter', {})
+                auth_mechs = set_params.get('authenticationMechanisms', '')
+                auth_mechs = auth_mechs.split(',')
+                if len(auth_mechs) == 1 and auth_mechs[0] == 'MONGODB-X509':
+                    return True
+                return False
+
+            any_only_x509 = lambda l: any(map(only_x509, l))
+            shard_configs = (s.get('shardParams', {}).get('procParams', {})
+                             for s in params.get('shards', []))
+            router_configs = params.get('routers', [])
+
+            self.x509_extra_user = (any_only_x509(configsvr_configs) or
+                                    any_only_x509(shard_configs) or
+                                    any_only_x509(router_configs))
+
+            roles = [
+                {'role': 'userAdminAnyDatabase', 'db': 'admin'},
+                {'role': 'clusterAdmin', 'db': 'admin'},
+                {'role': 'dbAdminAnyDatabase', 'db': 'admin'},
+                {'role': 'readWriteAnyDatabase', 'db': 'admin'}
+            ]
+
+            db = self.connection()[self.auth_source]
+            # Add mongo orchestration x509 user.
+            if self.x509_extra_user:
+                auth_dict = {
+                    'name': DEFAULT_SUBJECT,
+                    'writeConcern': {'w': 'majority'},
+                    'roles': roles
+                }
+                logger.debug(
+                    "add extra x509 user with parameters: %r" % auth_dict)
+                db.add_user(**auth_dict)
+
+            # Add secondary user given from request.
+            secondary_login = {
+                'name': self.login,
+                'writeConcern': {'w': 'majority'},
+                'roles': roles
+            }
+            if self.password:
+                secondary_login['password'] = self.password
+            db.add_user(**secondary_login)
+
+            # Do the same for the shards.
+            for shard_id, config in zip(self._shards, shard_configs):
+                # TODO: this won't work yet with replica sets.
+                shard = self._shards[shard_id]
+                instance_id = shard['_id']
+                # TODO: this won't work yet with replica sets.
+                if shard.get('isServer'):
+                    server = Servers()._storage[instance_id]
+                    if self.x509_extra_user:
+                        server.connection[self.auth_source].add_user(
+                            **auth_dict)
+                    if self.login:
+                        server.connection[self.auth_source].add_user(
+                            **secondary_login)
+
+        if self.restart_required:
+            def restart_with_auth_stuff(server, config=None):
+                server.x509_extra_user = self.x509_extra_user
+                server.auth_source = self.auth_source
+                server.ssl_params = self.sslParams
+                server.login = self.login
+                server.password = self.password
+                server.cfg.update(self.sslParams)
+                if self.auth_key:
+                    server.cfg['keyFile'] = key_file(self.auth_key)
+                if config:
+                    server.cfg.update(config)
+                server.restart_required = False  # Necessary?
+                server.restart()
+
+            for server_id, config in zip(self._configsvrs, configsvr_configs):
+                server = Servers()._storage[server_id]
+                restart_with_auth_stuff(server, config)
+
+            for server_id, config in zip(self._routers, router_configs):
+                server = Servers()._storage[server_id]
+                restart_with_auth_stuff(server, config)
+
+            for shard_id, config in zip(self._shards, shard_configs):
+                # TODO: this won't work yet with replica sets.
+                shard = self._shards[shard_id]
+                instance_id = shard['_id']
+                klass = ReplicaSets if shard.get('isReplicaSet') else Servers
+                instance = klass()._storage[instance_id]
+                restart_with_auth_stuff(instance, config)
+
+            self.restart_required = False
 
     def __init_configsvr(self, params):
         """create and start config servers"""
         self._configsvrs = []
         for cfg in params:
+            cfg = cfg.copy()
+
+            # Remove flags that turn on auth.
+            try:
+                cfg.pop('auth')
+            except KeyError:
+                pass
+            try:
+                cfg.pop('clusterAuthMode')
+            except KeyError:
+                pass
+
             cfg.update({'configsvr': True})
             self._configsvrs.append(Servers().create(
-                'mongod', cfg,
-                sslParams=self.sslParams, autostart=True,
-                auth_key=self.auth_key, version=self._version))
+                'mongod', cfg, sslParams=self.sslParams, autostart=True,
+                version=self._version))
 
     def __len__(self):
         return len(self._shards)
@@ -117,9 +222,13 @@ class ShardedCluster(object):
         """add new router (mongos) into existing configuration"""
         cfgs = ','.join([Servers().hostname(item) for item in self._configsvrs])
         params.update({'configdb': cfgs})
+
+        # Remove flags that turn auth on.
+        params = self.__strip_auth(params)
+
         self._routers.append(Servers().create(
             'mongos', params, sslParams=self.sslParams, autostart=True,
-            auth_key=self.auth_key, version=self._version))
+            version=self._version))
         return {'id': self._routers[-1], 'hostname': Servers().hostname(self._routers[-1])}
 
     def connection(self):
@@ -163,18 +272,28 @@ class ShardedCluster(object):
         """execute addShard command"""
         return self.router_command("addShard", (shard_uri, {"name": name}), is_eval=False)
 
+    def __strip_auth(self, config):
+        c = config.copy()
+        try:
+            c.pop('auth')
+        except KeyError:
+            pass
+        try:
+            c.pop('clusterAuthMode')
+        except KeyError:
+            pass
+        return c
+
     def member_add(self, member_id=None, params=None):
         """add new member into existing configuration"""
         member_id = member_id or str(uuid4())
         if 'members' in params:
             # is replica set
             rs_params = params.copy()
-            rs_params.update({'auth_key': self.auth_key})
             rs_params.update({'sslParams': self.sslParams})
-            if self.login and self.password:
-                rs_params.update({'login': self.login, 'password': self.password})
             if self._version:
                 rs_params['version'] = self._version
+            rs_params['members'] = map(self.__strip_auth, rs_params['members'])
             rs_id = ReplicaSets().create(rs_params)
             members = ReplicaSets().members(rs_id)
             cfgs = rs_id + r"/" + ','.join([item['host'] for item in members])
@@ -186,8 +305,10 @@ class ShardedCluster(object):
 
         else:
             # is single server
-            params.update({'autostart': True, 'auth_key': self.auth_key, 'sslParams': self.sslParams})
-            params['procParams'] = params.get('procParams', {})
+            params.update({'autostart': True, 'sslParams': self.sslParams})
+            params = params.copy()
+            params['procParams'] = self.__strip_auth(
+                params.get('procParams', {}))
             if self._version:
                 params['version'] = self._version
             logger.debug("servers create params: {params}".format(**locals()))
