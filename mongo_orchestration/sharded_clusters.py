@@ -233,13 +233,14 @@ class ShardedCluster(object):
 
     def connection(self):
         c = MongoClient(self.router['hostname'], **self.kwargs)
-        try:
-            self.login and self.password and c.admin.authenticate(self.login, self.password)
-        except:
-            logger.exception(
-                "Could not authenticate to %s as %s/%s"
-                % (self.router['hostname'], self.login, self.password))
-            raise
+        if self.login and not self.restart_required:
+            try:
+                c.admin.authenticate(self.login, self.password)
+            except:
+                logger.exception(
+                    "Could not authenticate to %s as %s/%s"
+                    % (self.router['hostname'], self.login, self.password))
+                raise
         return c
 
     def router_command(self, command, arg=None, is_eval=False):
@@ -290,7 +291,16 @@ class ShardedCluster(object):
         if 'members' in params:
             # is replica set
             rs_params = params.copy()
+
+            rs_params.update({'auth_key': self.auth_key})
             rs_params.update({'sslParams': self.sslParams})
+            rs_params.update({
+                'login': self.login,
+                'password': self.password,
+                'authSource': self.auth_source,
+                'auth_key': self.auth_key
+            })
+
             if self._version:
                 rs_params['version'] = self._version
             rs_params['members'] = map(self.__strip_auth, rs_params['members'])

@@ -31,7 +31,7 @@ from mongo_orchestration.replica_sets import ReplicaSets
 from mongo_orchestration.servers import Servers
 from mongo_orchestration.process import PortPool
 from nose.plugins.attrib import attr
-from tests import unittest, SkipTest, HOSTNAME
+from tests import certificate, unittest, SkipTest, HOSTNAME
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -594,6 +594,71 @@ class ShardTestCase(unittest.TestCase):
         for host in all_hosts:
             # No ConnectionFailure/AutoReconnect.
             pymongo.MongoClient(host)
+
+    # TODO: disable if server doesn't have ssl/scram.
+    def test_scram_with_ssl(self):
+        shard_params = {
+            'shardParams': {
+                'procParams': {
+                    'clusterAuthMode': 'x509',
+                    'setParameter': {
+                        'authenticationMechanisms': 'MONGODB-X509,SCRAM-SHA-1'}
+                }
+            }
+        }
+        router_params, configsvr_params = {}, {}
+        config = {
+            'login': 'luke',
+            'password': 'ekul',
+            'configsvrs': [configsvr_params],
+            'routers': [router_params],
+            'shards': [shard_params, shard_params],
+            'sslParams': {
+                'sslCAFile': certificate('ca.pem'),
+                'sslPEMKeyFile': certificate('server.pem'),
+                'sslMode': 'requireSSL',
+                'sslClusterFile': certificate('cluster_cert.pem'),
+                'sslAllowInvalidCertificates': True
+            }
+        }
+        # Should not raise an Exception.
+        self.sh = ShardedCluster(config)
+
+        # Should create the user we requested. No raise on authenticate.
+        host = self.sh.router['hostname']
+        client = pymongo.MongoClient(
+            host, ssl_certfile=certificate('client.pem'))
+        client.admin.authenticate('luke', 'ekul')
+        # This should be the only user.
+        self.assertEqual(len(client.admin.command('usersInfo')['users']), 1)
+        self.assertFalse(client['$external'].command('usersInfo')['users'])
+
+    # TODO: disable if server doesn't have ssl.
+    def test_ssl(self):
+        shard_params = {}
+        router_params = {}
+        configsvr_params = {}
+        config = {
+            'configsvrs': [configsvr_params],
+            'routers': [router_params],
+            'shards': [shard_params, shard_params],
+            'sslParams': {
+                'sslCAFile': certificate('ca.pem'),
+                'sslPEMKeyFile': certificate('server.pem'),
+                'sslMode': 'requireSSL',
+                'sslClusterFile': certificate('cluster_cert.pem'),
+                'sslAllowInvalidCertificates': True
+            }
+        }
+        # Should not raise an Exception.
+        self.sh = ShardedCluster(config)
+
+        # Server should require SSL.
+        host = self.sh.router['hostname']
+        self.assertRaises(pymongo.errors.ConnectionFailure,
+                          pymongo.MongoClient, host)
+        # This shouldn't raise.
+        pymongo.MongoClient(host, ssl_certfile=certificate('client.pem'))
 
 
 if __name__ == '__main__':
