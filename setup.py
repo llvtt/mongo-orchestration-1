@@ -39,7 +39,7 @@ setup(
                       'CherryPy>=3.5.0'] + extra_deps,
     tests_require=['nose>=1.2', 'coverage>=3.5'] + extra_test_deps,
     test_suite='nose.collector',
-    packages=find_packages(),
+    packages=find_packages(exclude=('tests',)),
     package_data={
         'mongo_orchestration': [
             os.path.join('configurations', config_dir, '*.json')
