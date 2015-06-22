@@ -61,8 +61,6 @@ class test(Command):
         if self.distribution.tests_require:
             self.distribution.fetch_build_eggs(self.distribution.tests_require)
         self.run_command('egg_info')
-        build_ext_cmd = self.reinitialize_command('build_ext')
-        build_ext_cmd.inplace = 1
         self.run_command('build_ext')
 
         # Construct a TextTestRunner directly from the unittest imported from
