@@ -53,7 +53,7 @@ class test(Command):
             )
 
     def run(self):
-        # Installing required packages, running egg_info and build_ext are
+        # Installing required packages and running egg_info and are
         # part of normal operation for setuptools.command.test.test
         if self.distribution.install_requires:
             self.distribution.fetch_build_eggs(
@@ -61,7 +61,6 @@ class test(Command):
         if self.distribution.tests_require:
             self.distribution.fetch_build_eggs(self.distribution.tests_require)
         self.run_command('egg_info')
-        self.run_command('build_ext')
 
         # Construct a TextTestRunner directly from the unittest imported from
         # test (this will be unittest2 under Python 2.6), which creates a
