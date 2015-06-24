@@ -180,7 +180,10 @@ class ServerTestCase(unittest.TestCase):
 
     def tearDown(self):
         if hasattr(self, 'server'):
-            self.server.stop()
+            # Wait for process to stop.
+            # This seems to be necessary on Windows.
+            while not self.server.stop():
+                time.sleep(1)
             self.server.cleanup()
 
     def test_server(self):
