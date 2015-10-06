@@ -33,14 +33,11 @@ class Daemon(object):
 
     source: http://www.jejik.com/articles/2007/02/a_simple_unix_linux_daemon_in_python/
     """
-    def __init__(self, pidfile,
-                 stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL,
-                 timeout=0):
+    def __init__(self, pidfile, stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL):
         self.stdin = stdin
         self.stdout = stdout
         self.stderr = stderr
         self.pidfile = pidfile
-        self.timeout = timeout  # sleep before exit from parent
 
     def daemonize(self):
         if os.name == 'nt':
@@ -65,8 +62,6 @@ class Daemon(object):
             pid = os.fork()
             if pid > 0:
                 # exit first parent
-                sys.stdout.write("child process started successfully, parent exiting after {timeout} seconds\n".format(timeout=self.timeout))
-                time.sleep(self.timeout)
                 sys.exit(0)
         except OSError as error:
             sys.stderr.write("fork #1 failed: %d (%s)\n" % (error.errno, error.strerror))

@@ -3,7 +3,9 @@
 import argparse
 import logging
 import signal
+import socket
 import sys
+import time
 
 try:
     # Need simplejson for the object_pairs_hook option in Python 2.6.
@@ -110,11 +112,27 @@ class MyDaemon(Daemon):
         BaseModel.socket_timeout = self.args.socket_timeout
         if self.args.command in ('start', 'restart'):
             print("Starting Mongo Orchestration on port %d..." % self.args.port)
-            run(get_app(), host=self.args.bind, port=self.args.port, debug=False,
-                reloader=False, quiet=not self.args.no_fork, server=self.args.server)
+            run(get_app(), host=self.args.bind, port=self.args.port,
+                debug=False, reloader=False, quiet=not self.args.no_fork,
+                server=self.args.server)
 
     def set_args(self, args):
         self.args = args
+
+
+def await_connection(attempts, host, port):
+    """Wait for mongo-orchestration to accept connections."""
+    for i in range(attempts):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s.connect((host, port))
+                return True
+            except (IOError, socket.error):
+                time.sleep(1)
+        finally:
+            s.close()
+    return False
 
 
 def main():
@@ -127,7 +145,7 @@ def main():
                             filemode='w')
         Server.silence_stdout = True
 
-    daemon = MyDaemon(PID_FILE, timeout=5, stdout=sys.stdout)
+    daemon = MyDaemon(PID_FILE, stdout=sys.stdout, stderr=sys.stderr)
     daemon.set_args(args)
     # Set default bind ip for mongo processes using argument from --bind.
     Server.mongod_default['bind_ip'] = args.bind
@@ -135,6 +153,10 @@ def main():
         daemon.stop()
     if args.command == 'start' and not args.no_fork:
         daemon.start()
+        if not await_connection(args.timeout, args.bind, args.port):
+            print("Could not connect to mongo-orchestration in timeout: %d"
+                  % args.timeout)
+            daemon.stop()
     if args.command == 'start' and args.no_fork:
         daemon.run()
     if args.command == 'restart':
