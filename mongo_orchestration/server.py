@@ -161,6 +161,7 @@ def main():
     else:
         logging.basicConfig(level=logging.DEBUG, filename=LOG_FILE)
         Server.silence_stdout = True
+    log = logging.getLogger(__name__)
 
     daemon = MyDaemon(os.path.abspath(args.pidfile), timeout=5,
                       stdout=sys.stdout)
@@ -170,7 +171,9 @@ def main():
     if args.command == 'stop':
         daemon.stop()
     if args.command == 'start' and not args.no_fork:
+        log.debug('Preparing to start mongo-orchestration daemon')
         pid = daemon.start()
+        log.debug('Daemon process started with pid: %d', pid)
         if not await_connection(host=args.bind, port=args.port):
             print(
                 'Could not connect to daemon running on %s:%d (pid: %d) '
@@ -178,6 +181,7 @@ def main():
                 % (args.bind, args.port, pid, CONNECT_ATTEMPTS))
             daemon.stop()
     if args.command == 'start' and args.no_fork:
+        log.debug('Starting mongo-orchestration in the foreground')
         daemon.run()
     if args.command == 'restart':
         daemon.restart()
